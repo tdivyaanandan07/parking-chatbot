@@ -1,0 +1,19 @@
+   name: CI
+   on: [push, pull_request]
+   jobs:
+     test:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-python@v5
+           with:
+             python-version: "3.12"
+         - run: pip install -r requirements.txt
+         - run: python -m pytest -v
+           env:
+             DIAL_ENDPOINT: https://example.com
+             DIAL_API_KEY: dummy
+             DIAL_API_VERSION: "2025-04-01-preview"
+             CHAT_MODEL: dummy
+             EMBED_MODEL: dummy
+             MCP_SECRET: ci-secret

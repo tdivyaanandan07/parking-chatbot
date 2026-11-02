@@ -6,4 +6,4 @@ __pycache__/
 *.pyc
 reservations.txt
 *.db
-.pytest_cache/
+.pytest_cache/*:Zone.Identifier
