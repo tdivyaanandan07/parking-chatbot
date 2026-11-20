@@ -125,6 +125,38 @@ def looks_valid(field: str, value: str) -> bool:
     return True
 
 
+FIELD_LABELS = {
+    "name": "first name",
+    "surname": "surname",
+    "car_number": "car number plate",
+    "period": "parking period",
+}
+
+
+def _ask_for_missing(draft: Reservation, missing: list[str], accepted: bool) -> str:
+    """Prompt for what's still needed, confirming anything just captured.
+
+    The user can answer several fields in one message, so when more than one is
+    missing we list them all (while still spelling out the period format).
+    """
+    prefix = ""
+    if accepted:
+        got = [f for f in ("name", "surname", "car_number", "period")
+               if getattr(draft, f)]
+        prefix = "Got it so far: " + ", ".join(
+            f"{FIELD_LABELS[f]} ({getattr(draft, f)})" for f in got) + ".\n\n"
+
+    if len(missing) == 1:
+        return prefix + FIELD_QUESTIONS[missing[0]]
+
+    wanted = ", ".join(FIELD_LABELS[f] for f in missing)
+    reply = (prefix + f"I still need your {wanted}. "
+             "You can give them all in one message.")
+    if "period" in missing:
+        reply += "\n\n" + FIELD_QUESTIONS["period"]
+    return reply
+
+
 def chat_turn(user_msg: str, draft: Reservation, collecting: bool):
     """
     One step of the conversation.
@@ -142,14 +174,20 @@ def chat_turn(user_msg: str, draft: Reservation, collecting: bool):
         f"Message: {user_msg}"
     )
 
-        # Only accept LLM-extracted values for fields that are still empty
+    # Only accept LLM-extracted values for fields that are still empty.
+    # The LLM may return several at once, so a single message can fill many
+    # fields ("I'm John Smith, plate ABC123, tomorrow 9am-5pm").
     still_missing = draft.missing()
     updates = {k: v for k, v in turn.model_dump().items()
                if k != "intent" and v and k in still_missing}
 
-    # When we just asked for a specific field, the user's own words are more
-    # reliable than the LLM's extraction (it may trim the date, for example).
-    if collecting and still_missing and turn.intent != "info":
+    # When we just asked for a specific field and the user is answering only
+    # that one field, their own words are more reliable than the LLM's
+    # extraction (it may trim the date, for example). But if the LLM pulled
+    # several fields out of this message, it's a multi-field answer and we must
+    # not clobber it by stuffing the whole message into a single field.
+    single_field_answer = len(updates) <= 1
+    if collecting and still_missing and turn.intent != "info" and single_field_answer:
         asked = still_missing[0]
         if asked in ("period", "car_number"):
             updates[asked] = user_msg.strip().rstrip(".,;")
@@ -180,7 +218,7 @@ def chat_turn(user_msg: str, draft: Reservation, collecting: bool):
     if wants_booking:
         missing = draft.missing()
         if missing:
-            return FIELD_QUESTIONS[missing[0]], draft, True, False
+            return _ask_for_missing(draft, missing, accepted=bool(updates)), draft, True, False
         return "Thank you! I'm sending your request to the administrator for approval...", draft, False, True
 
     # Otherwise answer an info question with RAG

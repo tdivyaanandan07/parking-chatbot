@@ -51,6 +51,47 @@ def test_human_period_needs_an_end():
     assert not check_period("tomorrow at 3pm", now=NOW)[0]
     assert canonicalize_period("tomorrow at 3pm", now=NOW) is None
 
+from unittest.mock import patch, MagicMock
+from src.rag import chatbot
+from src.rag.chatbot import Turn, chat_turn
+
+
+def _stub_llm(turn):
+    m = MagicMock()
+    m.with_structured_output.return_value.invoke.return_value = turn
+    return m
+
+
+def test_multiple_fields_in_one_message():
+    turn = Turn(intent="reserve", name="John", surname="Smith",
+                car_number="ABC123", period="tomorrow 9am to 5pm")
+    with patch.object(chatbot, "llm", _stub_llm(turn)):
+        _, draft, _, ready = chat_turn(
+            "I'm John Smith, plate ABC123, tomorrow 9am to 5pm",
+            Reservation(), collecting=True)
+    assert (draft.name, draft.surname, draft.car_number) == ("John", "Smith", "ABC123")
+    assert draft.period and ready
+
+
+def test_partial_multi_field_then_asks_for_rest():
+    turn = Turn(intent="reserve", name="Jane", car_number="XY9988")
+    with patch.object(chatbot, "llm", _stub_llm(turn)):
+        reply, draft, _, ready = chat_turn(
+            "Jane, car XY9988", Reservation(), collecting=False)
+    assert draft.name == "Jane" and draft.car_number == "XY9988"
+    assert not ready and "surname" in reply and "period" in reply
+
+
+def test_single_field_answer_uses_raw_words_for_period():
+    # LLM trims the period; the raw message is the fuller, authoritative answer.
+    turn = Turn(intent="reserve", period="tomorrow")
+    draft0 = Reservation(name="A", surname="B", car_number="CC11")
+    with patch.object(chatbot, "llm", _stub_llm(turn)):
+        _, draft, _, ready = chat_turn(
+            "tomorrow 12 noon to 4pm", draft0, collecting=True)
+    assert draft.period and ready
+
+
 from src.db.sql_db import get_dynamic_context, get_available_slots
 
 def test_available_slots_returns_future_dates():
