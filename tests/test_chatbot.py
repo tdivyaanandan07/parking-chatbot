@@ -1,6 +1,6 @@
 from src.rag.chatbot import Reservation, looks_valid
 from datetime import datetime
-from src.rag.chatbot import Reservation, looks_valid, check_period
+from src.rag.chatbot import Reservation, looks_valid, check_period, canonicalize_period
 
 def test_missing_fields():
     r = Reservation(name="A")
@@ -26,6 +26,30 @@ def test_end_before_start_rejected():
 
 def test_bad_format_rejected():
     assert not check_period("tomorrow at 3pm", now=NOW)[0]
+
+
+# NOW is Thursday 2026-11-19 12:00 in these tests.
+
+def test_human_period_accepted():
+    assert check_period("tomorrow 12 noon to 4pm", now=NOW)[0]
+    assert check_period("for tomorrow 12 noon to 4pm", now=NOW)[0]
+    assert check_period("next monday 3-5pm", now=NOW)[0]
+    assert check_period("25 nov 14:00 to 16:00", now=NOW)[0]
+    assert check_period("tomorrow 10am for 2 hours", now=NOW)[0]
+    assert check_period("this friday evening", now=NOW)[0]  # Fri 18:00 is after NOW (Thu 12:00)
+
+
+def test_human_period_canonicalized():
+    assert canonicalize_period("tomorrow 12 noon to 4pm", now=NOW) == "2026-11-20 12:00 to 16:00"
+    assert canonicalize_period("next monday 3-5pm", now=NOW) == "2026-11-23 15:00 to 17:00"
+    # crossing midnight keeps both dates so booking.py can parse it back
+    assert canonicalize_period("tomorrow 9pm to 2am", now=NOW) == "2026-11-20 21:00 to 2026-11-21 02:00"
+
+
+def test_human_period_needs_an_end():
+    # a lone start time is still not a valid period
+    assert not check_period("tomorrow at 3pm", now=NOW)[0]
+    assert canonicalize_period("tomorrow at 3pm", now=NOW) is None
 
 from src.db.sql_db import get_dynamic_context, get_available_slots
 

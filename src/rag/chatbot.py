@@ -5,6 +5,7 @@ from src.config import llm
 from src.db.sql_db import get_dynamic_context
 from src.rag.vector_store import load_retriever
 from src.guardrails.filters import redact, is_malicious
+from src.datetime_nl import parse_human_period
 from datetime import datetime
 
 _retriever = None
@@ -57,21 +58,55 @@ PERIOD_RE = re.compile(
     r"^\s*(\d{4}-\d{2}-\d{2})\s+(?:from\s+)?(\d{2}:\d{2})\s+to\s+(\d{2}:\d{2})\s*$",
     re.IGNORECASE,
 )
-PERIOD_HINT = "Please use the format YYYY-MM-DD from HH:MM to HH:MM, e.g. 2026-11-25 from 09:00 to 18:00."
+PERIOD_HINT = (
+    "Please give a date, a start time and an end time, e.g. "
+    "'2026-11-25 from 09:00 to 18:00' or 'tomorrow 12 noon to 4pm'."
+)
+
+
+def _period_bounds(text: str, now: datetime):
+    """Resolve any accepted period form to (start, end) datetimes, or None.
+
+    Accepts the strict 'YYYY-MM-DD from HH:MM to HH:MM' format and human
+    phrases like 'tomorrow 12 noon to 4pm' or 'next monday 3-5pm'.
+    """
+    m = PERIOD_RE.match(text or "")
+    if m:
+        day, start_s, end_s = m.groups()
+        try:
+            start = datetime.strptime(f"{day} {start_s}", "%Y-%m-%d %H:%M")
+            end = datetime.strptime(f"{day} {end_s}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            return "bad-datetime"
+        return start, end
+    return parse_human_period(text or "", now)
+
+
+def canonicalize_period(text: str, now: datetime | None = None) -> str | None:
+    """Rewrite an accepted period into the stored 'YYYY-MM-DD HH:MM to ...' form.
+
+    Downstream (booking.py, the reservations file) only understands the exact
+    format, so human input is normalized here before it is saved.
+    """
+    now = now or datetime.now()
+    bounds = _period_bounds(text, now)
+    if not bounds or bounds == "bad-datetime":
+        return None
+    start, end = bounds
+    if start.date() == end.date():
+        return f"{start:%Y-%m-%d %H:%M} to {end:%H:%M}"
+    return f"{start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M}"
 
 
 def check_period(text: str, now: datetime | None = None) -> tuple[bool, str]:
     """Return (is_valid, message_for_the_user)."""
     now = now or datetime.now()
-    m = PERIOD_RE.match(text or "")
-    if not m:
-        return False, PERIOD_HINT
-    day, start_s, end_s = m.groups()
-    try:
-        start = datetime.strptime(f"{day} {start_s}", "%Y-%m-%d %H:%M")
-        end = datetime.strptime(f"{day} {end_s}", "%Y-%m-%d %H:%M")
-    except ValueError:
+    bounds = _period_bounds(text, now)
+    if bounds == "bad-datetime":
         return False, "That date or time doesn't exist. " + PERIOD_HINT
+    if not bounds:
+        return False, PERIOD_HINT
+    start, end = bounds
     if start < now:
         return False, "That time is in the past. Please choose a future date and time."
     if end <= start:
@@ -128,6 +163,10 @@ def chat_turn(user_msg: str, draft: Reservation, collecting: bool):
     updates_before_filter = dict(updates)
     rejected = [k for k, v in updates.items() if not looks_valid(k, v)]
     updates = {k: v for k, v in updates.items() if k not in rejected}
+    if "period" in updates:
+        canon = canonicalize_period(updates["period"])
+        if canon:
+            updates["period"] = canon
     draft = draft.model_copy(update=updates)
     if rejected:
         if rejected[0] == "period":
