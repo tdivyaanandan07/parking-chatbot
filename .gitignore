@@ -9,3 +9,5 @@ reservations.txt
 .pytest_cache/*:Zone.Identifier
 
 docs/codemie/
+data/checkpoints.db-shm
+data/checkpoints.db-wal
