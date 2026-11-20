@@ -5,6 +5,7 @@ from src.config import llm
 from src.db.sql_db import get_dynamic_context
 from src.rag.vector_store import load_retriever
 from src.guardrails.filters import redact, is_malicious
+from datetime import datetime
 
 _retriever = None
 
@@ -52,6 +53,31 @@ LIVE DATA:
 
 QUESTION: {question}"""
 
+PERIOD_RE = re.compile(
+    r"^\s*(\d{4}-\d{2}-\d{2})\s+(?:from\s+)?(\d{2}:\d{2})\s+to\s+(\d{2}:\d{2})\s*$",
+    re.IGNORECASE,
+)
+PERIOD_HINT = "Please use the format YYYY-MM-DD from HH:MM to HH:MM, e.g. 2026-11-25 from 09:00 to 18:00."
+
+
+def check_period(text: str, now: datetime | None = None) -> tuple[bool, str]:
+    """Return (is_valid, message_for_the_user)."""
+    now = now or datetime.now()
+    m = PERIOD_RE.match(text or "")
+    if not m:
+        return False, PERIOD_HINT
+    day, start_s, end_s = m.groups()
+    try:
+        start = datetime.strptime(f"{day} {start_s}", "%Y-%m-%d %H:%M")
+        end = datetime.strptime(f"{day} {end_s}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        return False, "That date or time doesn't exist. " + PERIOD_HINT
+    if start < now:
+        return False, "That time is in the past. Please choose a future date and time."
+    if end <= start:
+        return False, "The end time must be after the start time."
+    return True, ""
+
 def looks_valid(field: str, value: str) -> bool:
     v = value.strip()
     if field in ("name", "surname"):
@@ -60,7 +86,7 @@ def looks_valid(field: str, value: str) -> bool:
     if field == "car_number":
         return 3 <= len(v) <= 12 and any(ch.isdigit() for ch in v)
     if field == "period":
-        return bool(re.search(r"\d{4}-\d{2}-\d{2}", v)) and len(v) >= 12
+        return check_period(v)[0]
     return True
 
 
@@ -82,7 +108,6 @@ def chat_turn(user_msg: str, draft: Reservation, collecting: bool):
     )
 
         # Only accept LLM-extracted values for fields that are still empty
-        # Only accept LLM-extracted values for fields that are still empty
     still_missing = draft.missing()
     updates = {k: v for k, v in turn.model_dump().items()
                if k != "intent" and v and k in still_missing}
@@ -100,11 +125,14 @@ def chat_turn(user_msg: str, draft: Reservation, collecting: bool):
         updates = {still_missing[0]: user_msg.strip()}
 
     # Drop answers that don't look valid (e.g. a whole sentence as a surname)
+    updates_before_filter = dict(updates)
     rejected = [k for k, v in updates.items() if not looks_valid(k, v)]
     updates = {k: v for k, v in updates.items() if k not in rejected}
-
     draft = draft.model_copy(update=updates)
     if rejected:
+        if rejected[0] == "period":
+            _, msg = check_period(updates_before_filter["period"])
+            return msg, draft, True, False
         label = rejected[0].replace("_", " ")
         return (f"Sorry, that doesn't look like a valid {label}. "
                 f"{FIELD_QUESTIONS[rejected[0]]}"), draft, True, False

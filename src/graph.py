@@ -4,7 +4,12 @@ from langgraph.graph import StateGraph, END
 from src.rag.chatbot import chat_turn, Reservation
 from src.admin.agent import request_approval
 from src.mcp_client import save_via_mcp
+from src.rag.chatbot import check_period
 
+def after_chat(s):
+    if s["ready"] and check_period(s["draft"].period)[0]:
+        return "admin"
+    return END
 
 class State(TypedDict):
     user_msg: str

@@ -1,3 +1,4 @@
+import os
 import re
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
@@ -18,7 +19,7 @@ BLOCKED_PATTERNS = [
 
 
 def redact(text: str) -> str:
-    """Replace emails, phone numbers, card numbers etc. with placeholders."""
+    """Replace emails, phone numbers, card numbers and similar data with placeholders."""
     results = _analyzer.analyze(text=text, language="en", entities=SENSITIVE)
     return _anonymizer.anonymize(text=text, analyzer_results=results).text
 

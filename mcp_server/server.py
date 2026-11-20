@@ -3,6 +3,9 @@ import re
 from datetime import datetime
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.booking import find_conflict
 
 load_dotenv()
 
@@ -24,6 +27,9 @@ def write_reservation(name: str, car_number: str, period: str, token: str) -> st
         return "ERROR: invalid car number"
     approved_at = datetime.now().isoformat(timespec="seconds")
     line = f"{clean(name)} | {clean(car_number)} | {clean(period)} | {approved_at}\n"
+    conflict = find_conflict(car_number, period, FILE)
+    if conflict:
+        return "ERROR: overlapping booking exists for this car"
     with open(FILE, "a", encoding="utf-8") as f:
         f.write(line)
     return "OK: saved"
