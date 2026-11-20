@@ -1,17 +1,20 @@
 import os
 import sys
 import asyncio
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 load_dotenv()
+
+SERVER = Path(__file__).resolve().parent.parent / "mcp_server" / "server.py"
 
 
 async def _save(name: str, car_number: str, period: str, reference: str) -> str:
     client = MultiServerMCPClient({
         "writer": {
             "command": sys.executable,
-            "args": ["mcp_server/server.py"],
+            "args": [str(SERVER)],
             "transport": "stdio",
             "env": {**os.environ, "MCP_SECRET": os.environ["MCP_SECRET"]},
         }

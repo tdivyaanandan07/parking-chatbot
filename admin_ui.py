@@ -1,7 +1,8 @@
+import os
 import requests
 import streamlit as st
 
-ADMIN_URL = "http://localhost:8001"
+ADMIN_URL = os.environ.get("ADMIN_URL", "http://localhost:8001")
 
 st.set_page_config(page_title="CityPark Admin", page_icon="🛡️")
 st.title("🛡️ Administrator: reservation requests")

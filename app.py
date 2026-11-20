@@ -1,5 +1,5 @@
 import streamlit as st
-from src.graph import app as graph
+from src.graph import run_turn
 from src.rag.chatbot import Reservation
 
 st.set_page_config(page_title="CityPark Assistant", page_icon="🅿️")
@@ -51,12 +51,7 @@ if prompt := st.chat_input("Type your message..."):
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            out = graph.invoke({
-                "user_msg": prompt,
-                "draft": st.session_state.draft,
-                "collecting": st.session_state.collecting,
-                "reply": "", "ready": False, "reference": None,
-            })
+            out = run_turn(prompt, st.session_state.draft, st.session_state.collecting)
         st.markdown(out["reply"])
 
     if out.get("reference"):

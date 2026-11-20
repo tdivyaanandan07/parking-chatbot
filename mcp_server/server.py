@@ -10,7 +10,7 @@ from src.booking import find_conflict
 load_dotenv()
 
 mcp = FastMCP("reservation-writer")
-FILE = "reservations.txt"
+FILE = os.environ.get("RESERVATIONS_FILE", "reservations.txt")
 SECRET = os.environ.get("MCP_SECRET", "")
 
 

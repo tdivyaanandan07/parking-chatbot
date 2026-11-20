@@ -25,9 +25,11 @@ CREATE TABLE IF NOT EXISTS reservation_requests(
     status     TEXT NOT NULL DEFAULT 'pending',
     note       TEXT,
     created_at TEXT NOT NULL,
-    decided_at TEXT
+    decided_at TEXT,
+    thread_id  TEXT
 )
 """
+# thread_id: the LangGraph run paused at admin_approval for this request, if any.
 
 
 def _connect():
@@ -35,6 +37,9 @@ def _connect():
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.execute(SCHEMA)
+    cols = {r["name"] for r in con.execute("PRAGMA table_info(reservation_requests)")}
+    if "thread_id" not in cols:  # databases created before the graph owned approvals
+        con.execute("ALTER TABLE reservation_requests ADD COLUMN thread_id TEXT")
     return con
 
 
@@ -52,7 +57,7 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def create_request(reservation: dict, message: str) -> dict:
+def create_request(reservation: dict, message: str, thread_id: Optional[str] = None) -> dict:
     """Store a new pending request under a fresh, unique reference number."""
     con = _connect()
     try:
@@ -61,11 +66,11 @@ def create_request(reservation: dict, message: str) -> dict:
             try:
                 con.execute(
                     "INSERT INTO reservation_requests"
-                    "(reference, name, surname, car_number, period, message, created_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(reference, name, surname, car_number, period, message, created_at,"
+                    " thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (ref, reservation.get("name"), reservation.get("surname"),
                      reservation.get("car_number"), reservation.get("period"),
-                     message, _now()))
+                     message, _now(), thread_id))
                 con.commit()
                 break
             except sqlite3.IntegrityError:

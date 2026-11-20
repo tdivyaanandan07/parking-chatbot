@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from src.admin import api
+from src.admin import api, recording
 from src.db import requests_db
 
 client = TestClient(api.app)
@@ -12,7 +12,7 @@ RES = {"name": "Ann", "surname": "Lee", "car_number": "AB-1234",
 def temp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(requests_db, "DB_PATH", tmp_path / "test.db")
     saved = []
-    monkeypatch.setattr(api, "save_via_mcp", lambda *a: saved.append(a) or "OK: saved")
+    monkeypatch.setattr(recording, "save_via_mcp", lambda *a: saved.append(a) or "OK: saved")
     return saved
 
 
@@ -45,7 +45,7 @@ def test_refuse_does_not_save(temp_db):
 
 
 def test_failed_save_is_reported(monkeypatch):
-    monkeypatch.setattr(api, "save_via_mcp", lambda *a: "ERROR: overlapping booking exists")
+    monkeypatch.setattr(recording, "save_via_mcp", lambda *a: "ERROR: overlapping booking exists")
     rid = _create()["id"]
     res = client.post(f"/requests/{rid}/decision", json={"approved": True}).json()
     assert res["status"] == "save_failed" and "overlapping" in res["note"]

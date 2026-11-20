@@ -1,8 +1,11 @@
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from src import graph
 from src.db import requests_db
-from src.mcp_client import save_via_mcp
+from src.admin.recording import record_approved
 
 app = FastAPI(title="Admin Inbox")
 
@@ -10,6 +13,7 @@ app = FastAPI(title="Admin Inbox")
 class NewRequest(BaseModel):
     reservation: dict = {}
     message: str = ""
+    thread_id: Optional[str] = None
 
 
 class Decision(BaseModel):
@@ -39,7 +43,8 @@ def _public(req: dict) -> dict:
 
 @app.post("/requests")
 def create_request(payload: NewRequest):
-    return _public(requests_db.create_request(payload.reservation, payload.message))
+    return _public(requests_db.create_request(payload.reservation, payload.message,
+                                              payload.thread_id))
 
 
 @app.get("/requests/pending")
@@ -63,16 +68,13 @@ def decide(rid: str, d: Decision):
         raise HTTPException(404, "Not found")
     if req["status"] != "pending":
         raise HTTPException(409, f"Already decided: {req['status']}")
+
+    # Normal path: resume the graph run paused at admin_approval; its record
+    # node writes an approved booking through MCP and updates the status.
+    if req["thread_id"] and graph.resume_with_decision(req["thread_id"], d.approved):
+        return _public(requests_db.get_request(rid))
+
+    # No paused run (request posted straight to the API): apply the same steps here.
     if not d.approved:
         return _public(requests_db.set_status(rid, "refused"))
-
-    # Approved: write it to the reservations file through the MCP server now,
-    # since the customer is no longer waiting in the chat for the outcome.
-    try:
-        result = save_via_mcp(f"{req['name']} {req['surname']}", req["car_number"],
-                              req["period"], rid)
-    except Exception as e:
-        result = f"ERROR: {e}"
-    if "OK" in result:
-        return _public(requests_db.set_status(rid, "approved"))
-    return _public(requests_db.set_status(rid, "save_failed", result))
+    return _public(record_approved(rid))
