@@ -1,15 +1,9 @@
 from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
 
-from src.rag.chatbot import chat_turn, Reservation
-from src.admin.agent import request_approval
-from src.mcp_client import save_via_mcp
-from src.rag.chatbot import check_period
+from src.rag.chatbot import chat_turn, Reservation, format_summary
+from src.admin.agent import submit_for_approval
 
-def after_chat(s):
-    if s["ready"] and check_period(s["draft"].period)[0]:
-        return "admin"
-    return END
 
 class State(TypedDict):
     user_msg: str
@@ -17,58 +11,50 @@ class State(TypedDict):
     collecting: bool
     reply: str
     ready: bool
-    decision: Optional[str]
+    reference: Optional[str]
 
 
 def chat_node(s: State):
-    """Agent 1: RAG chatbot. Answers questions and collects booking details."""
+    """Agent 1: RAG chatbot. Answers questions, collects and confirms booking details,
+    and checks the status of existing reservations."""
     reply, draft, collecting, ready = chat_turn(s["user_msg"], s["draft"], s["collecting"])
     return {"reply": reply, "draft": draft, "collecting": collecting,
-            "ready": ready, "decision": None}
+            "ready": ready, "reference": None}
 
 
-def admin_node(s: State):
-    """Agent 2: asks the human administrator and waits."""
-    decision = request_approval(s["draft"].model_dump())
-    return {"decision": decision}
-
-
-def record_node(s: State):
-    """MCP server writes the approved booking to the file."""
+def submit_node(s: State):
+    """Agent 2: sends the confirmed booking to the administrator without waiting.
+    Approved requests are written to the file by the admin API through MCP."""
     d = s["draft"]
-    result = save_via_mcp(f"{d.name} {d.surname}", d.car_number, d.period)
-    ok = "OK" in result
-    reply = ("Your reservation is approved and saved!" if ok
-             else "Approved, but saving failed. Please contact the front desk.")
-    return {"reply": reply, "draft": Reservation(), "collecting": False, "ready": False}
-
-
-def refused_node(s: State):
-    if s["decision"] == "refused":
-        reply = "Sorry, the administrator refused this reservation."
-    else:
-        reply = "The administrator did not respond in time. Please try again later."
-    return {"reply": reply, "draft": Reservation(), "collecting": False, "ready": False}
+    try:
+        ref = submit_for_approval(d.model_dump())
+    except Exception:
+        # Keep the draft and stay in confirmation, so "yes" simply retries.
+        return {"reply": ("Sorry, I couldn't reach the administrator just now. Your details "
+                          "are kept; reply **yes** to try again or **cancel**."),
+                "collecting": True, "ready": False}
+    reply = (
+        "Your reservation has been sent to the administrator for approval.\n\n"
+        f"{format_summary(d, ref)}\n\n"
+        f"Please keep your reference number **{ref}**. To check the status later, just ask "
+        f"me and give the reference number together with your car number plate, e.g. "
+        f"\"status of {ref} for car {d.car_number}\".\n\n"
+        "Is there anything else I can help with? You can make another reservation too."
+    )
+    return {"reply": reply, "draft": Reservation(), "collecting": False,
+            "ready": False, "reference": ref}
 
 
 def after_chat(s: State):
-    return "admin" if s["ready"] else END
-
-
-def after_admin(s: State):
-    return "record" if s["decision"] == "approved" else "refused"
+    return "submit" if s["ready"] else END
 
 
 g = StateGraph(State)
 g.add_node("chat", chat_node)
-g.add_node("admin", admin_node)
-g.add_node("record", record_node)
-g.add_node("refused", refused_node)
+g.add_node("submit", submit_node)
 
 g.set_entry_point("chat")
-g.add_conditional_edges("chat", after_chat, {"admin": "admin", END: END})
-g.add_conditional_edges("admin", after_admin, {"record": "record", "refused": "refused"})
-g.add_edge("record", END)
-g.add_edge("refused", END)
+g.add_conditional_edges("chat", after_chat, {"submit": "submit", END: END})
+g.add_edge("submit", END)
 
 app = g.compile()

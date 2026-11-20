@@ -10,7 +10,7 @@ while True:
         break
     out = app.invoke({
         "user_msg": msg, "draft": state["draft"], "collecting": state["collecting"],
-        "reply": "", "ready": False, "decision": None,
+        "reply": "", "ready": False, "reference": None,
     })
     state = {"draft": out["draft"], "collecting": out["collecting"]}
     print("Bot:", out["reply"])

@@ -25,6 +25,7 @@ def pending_list():
     for r in items:
         res = r["details"].get("reservation", {})
         with st.container(border=True):
+            st.caption(f"Reference {r.get('reference', r['id'])}")
             st.write(r["details"].get("message", ""))
             st.write(f"**{res.get('name')} {res.get('surname')}** | "
                      f"car **{res.get('car_number')}** | {res.get('period')}")

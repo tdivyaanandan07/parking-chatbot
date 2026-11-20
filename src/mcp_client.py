@@ -7,7 +7,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 load_dotenv()
 
 
-async def _save(name: str, car_number: str, period: str) -> str:
+async def _save(name: str, car_number: str, period: str, reference: str) -> str:
     client = MultiServerMCPClient({
         "writer": {
             "command": sys.executable,
@@ -20,10 +20,10 @@ async def _save(name: str, car_number: str, period: str) -> str:
     tool = next(t for t in tools if t.name == "save_reservation")
     result = await tool.ainvoke({
         "name": name, "car_number": car_number, "period": period,
-        "token": os.environ["MCP_SECRET"],
+        "token": os.environ["MCP_SECRET"], "reference": reference,
     })
     return str(result)
 
 
-def save_via_mcp(name: str, car_number: str, period: str) -> str:
-    return asyncio.run(_save(name, car_number, period))
+def save_via_mcp(name: str, car_number: str, period: str, reference: str = "") -> str:
+    return asyncio.run(_save(name, car_number, period, reference))

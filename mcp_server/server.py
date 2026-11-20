@@ -19,14 +19,18 @@ def clean(s: str) -> str:
     return re.sub(r"[|\n\r]", " ", s).strip()[:100]
 
 
-def write_reservation(name: str, car_number: str, period: str, token: str) -> str:
+def write_reservation(name: str, car_number: str, period: str, token: str,
+                      reference: str = "") -> str:
     """Core logic (a plain function so it is easy to test)."""
     if not SECRET or token != SECRET:
         return "ERROR: unauthorized"
-    if not re.fullmatch(r"[A-Za-z0-9\- ]{3,12}", car_number.strip()):
+    if not re.fullmatch(r"[A-Za-z0-9\- ]{3,12}", (car_number or "").strip()):
         return "ERROR: invalid car number"
     approved_at = datetime.now().isoformat(timespec="seconds")
-    line = f"{clean(name)} | {clean(car_number)} | {clean(period)} | {approved_at}\n"
+    line = f"{clean(name)} | {clean(car_number)} | {clean(period)} | {approved_at}"
+    if reference:
+        line += f" | {clean(reference)}"
+    line += "\n"
     conflict = find_conflict(car_number, period, FILE)
     if conflict:
         return "ERROR: overlapping booking exists for this car"
@@ -36,9 +40,10 @@ def write_reservation(name: str, car_number: str, period: str, token: str) -> st
 
 
 @mcp.tool()
-def save_reservation(name: str, car_number: str, period: str, token: str) -> str:
+def save_reservation(name: str, car_number: str, period: str, token: str,
+                     reference: str = "") -> str:
     """Save an APPROVED parking reservation to the text file."""
-    return write_reservation(name, car_number, period, token)
+    return write_reservation(name, car_number, period, token, reference)
 
 
 if __name__ == "__main__":

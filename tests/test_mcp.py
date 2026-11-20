@@ -12,6 +12,13 @@ def test_writes_line(tmp_path, monkeypatch):
     assert "Ann Lee | AB-123" in (tmp_path / "r.txt").read_text()
 
 
+def test_writes_reference_column(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "FILE", str(tmp_path / "r.txt"))
+    monkeypatch.setattr(server, "SECRET", "s")
+    server.write_reservation("Ann Lee", "AB-123", "2026-11-05", "s", "CP-7K3F9Q")
+    assert (tmp_path / "r.txt").read_text().rstrip().endswith("| CP-7K3F9Q")
+
+
 def test_rejects_bad_car_number(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "FILE", str(tmp_path / "r.txt"))
     monkeypatch.setattr(server, "SECRET", "s")

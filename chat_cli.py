@@ -1,4 +1,4 @@
-from src.rag.chatbot import chat_turn, Reservation
+from src.rag.chatbot import chat_turn, Reservation, format_summary
 
 draft = Reservation()
 collecting = False
@@ -11,14 +11,13 @@ while True:
     reply, draft, collecting, ready = chat_turn(msg, draft, collecting)
     print("Bot:", reply)
     if ready:
-        from src.admin.agent import request_approval
-        decision = request_approval(draft.model_dump())
-        if decision == "approved":
-            from src.mcp_client import save_via_mcp
-            save_via_mcp(f"{draft.name} {draft.surname}", draft.car_number, draft.period)
-            print("Bot: Your reservation is approved and saved!")
-        elif decision == "refused":
-            print("Bot: Sorry, the administrator refused this reservation.")
-        else:
-            print("Bot: The administrator did not respond in time. Please try again later.")
+        from src.admin.agent import submit_for_approval
+        try:
+            ref = submit_for_approval(draft.model_dump())
+        except Exception:
+            print("Bot: Sorry, I couldn't reach the administrator. Reply 'yes' to try again.")
+            collecting = True
+            continue
+        print("Bot: Sent to the administrator for approval.\n" + format_summary(draft, ref))
+        print(f"Bot: Ask me for the status any time with {ref} and your car number.")
         draft, collecting = Reservation(), False

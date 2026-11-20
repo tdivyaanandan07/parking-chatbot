@@ -37,8 +37,10 @@ A multi-agent chatbot for a parking facility. It answers questions about the par
   - *Dynamic* data (prices, working hours, free spaces) is stored in **SQLite** and read live, so it is never stale or hallucinated.
 - **Interactive booking:** collects name, surname, car number and reservation period one field at a time, with input validation. Questions can be asked in the middle of a booking.
 - **Guardrails:** Microsoft Presidio (pre-trained NLP) redacts emails, phone numbers, card numbers, IBAN and SSN. A pattern filter blocks prompt-injection and data-extraction attempts.
-- **Human-in-the-loop:** a second LangChain agent writes an approval request and waits for the administrator's decision through a REST API.
-- **MCP server:** writes approved reservations to a text file as `Name | Car Number | Reservation Period | Approval Time`.
+- **Confirm before submitting:** once all details are in, the bot shows a summary and waits for **yes**, a correction ("change the car to XY-123") or **cancel**.
+- **Human-in-the-loop:** a second LangChain agent writes an approval request and sends it to the administrator through a REST API. The chat doesn't wait: the customer gets a unique **reference number** (e.g. `CP-7K3F9Q`) and can keep chatting or book again.
+- **Status checks:** ask the bot for a reservation's status. For privacy it needs **both** the reference number and the car number plate, and it gives the same "not found" answer whichever one is wrong.
+- **MCP server:** when the administrator approves, the admin API writes the reservation to a text file as `Name | Car Number | Reservation Period | Approval Time | Reference`.
 - **LangGraph orchestration** of all components.
 - **Web UI (Streamlit)** for customers and for the administrator.
 - **Evaluation, load tests, automated tests and CI.**
@@ -50,13 +52,14 @@ A multi-agent chatbot for a parking facility. It answers questions about the par
 ```mermaid
 flowchart LR
     U[User] --> C[Chat node<br/>RAG agent]
-    C -->|question / next field| U
-    C -->|booking complete| A[Admin node<br/>approval agent]
-    A -->|approved| R[Record node<br/>MCP server]
-    A -->|refused / timeout| F[Refused node]
-    R --> FILE[(reservations.txt)]
-    A <-->|REST| API[Admin Inbox API]
+    C -->|question / next field /<br/>summary to confirm / status| U
+    C -->|user confirmed| S[Submit node<br/>approval agent]
+    S -->|reference number| U
+    S -->|REST| API[Admin Inbox API<br/>SQLite]
+    C -->|status: reference + car| API
     ADMIN((Human<br/>administrator)) <--> API
+    API -->|on approve| M[MCP server]
+    M --> FILE[(reservations.txt)]
 ```
 
 ```mermaid
@@ -79,11 +82,12 @@ flowchart TB
 | Vector store | `src/rag/vector_store.py` | Builds and loads the FAISS index (static data) |
 | SQL database | `src/db/sql_db.py` | Prices, hours, availability (dynamic data) |
 | Guardrails | `src/guardrails/filters.py` | Sensitive-data redaction and attack filtering |
-| Agent 2: admin agent | `src/admin/agent.py` | Writes the approval request and waits for the decision |
-| Admin Inbox API | `src/admin/api.py` | FastAPI service where the administrator approves or refuses |
+| Agent 2: admin agent | `src/admin/agent.py` | Writes the approval request, submits it and returns the reference; looks up status |
+| Admin Inbox API | `src/admin/api.py` | FastAPI service where the administrator approves or refuses; saves approved bookings via MCP |
+| Request store | `src/db/requests_db.py` | SQLite table of requests, reference numbers and statuses |
 | MCP server | `mcp_server/server.py` | Secure file writer (stdio transport) |
-| MCP client | `src/mcp_client.py` | Calls the MCP server from the graph |
-| Orchestration | `src/graph.py` | LangGraph state machine: `chat → admin → record / refused` |
+| MCP client | `src/mcp_client.py` | Calls the MCP server from the admin API |
+| Orchestration | `src/graph.py` | LangGraph state machine: `chat → submit` |
 | Customer UI | `app.py` | Streamlit chat |
 | Admin UI | `admin_ui.py` | Streamlit approve / refuse page |
 
@@ -160,7 +164,7 @@ streamlit run app.py --server.port 8501        # customer chat   -> http://local
 streamlit run admin_ui.py --server.port 8502   # administrator   -> http://localhost:8502
 ```
 
-The customer asks questions or books a space. When the booking is complete, the request appears on the administrator page within 2 seconds. Clicking **Approve** or **Refuse** completes the customer's conversation.
+The customer asks questions or books a space. When the details are complete the bot shows a summary; after the customer confirms, the request appears on the administrator page within 2 seconds and the customer gets a reference number straight away. Clicking **Approve** saves the booking through MCP (or **Refuse** rejects it); the customer sees the result by asking for the status.
 
 ### Option B: Terminal
 
@@ -177,14 +181,20 @@ You: Divya
 You: Anandan
 You: AB-1234
 You: 2026-11-05 from 09:00 to 18:00
+Bot: Please check your reservation: ... Reply yes to send it ...
+You: yes
+Bot: Your reservation has been sent to the administrator for approval.
+     Reference number: CP-7K3F9Q ...
+You: what's the status of CP-7K3F9Q for car AB-1234?
+Bot: Reservation CP-7K3F9Q is waiting for the administrator's approval.
 ```
 
-The bot then waits for the administrator. Approve through the Streamlit admin page, or open http://localhost:8001/docs, copy the id from `GET /requests/pending`, and send `{"approved": true}` (or `false`) to `POST /requests/{rid}/decision`.
+Approve through the Streamlit admin page, or open http://localhost:8001/docs, copy the id from `GET /requests/pending`, and send `{"approved": true}` (or `false`) to `POST /requests/{rid}/decision`. Statuses are `pending`, `approved`, `refused`, or `save_failed` (approved but the MCP writer rejected it, e.g. an overlapping booking for the same car). Requests are kept in `data/parking.db`, so reference numbers survive restarts.
 
 Approved bookings are appended to `reservations.txt`:
 
 ```
-Divya Anandan | AB-1234 | 2026-11-05 from 09:00 to 18:00 | 2026-11-01T20:29:19
+Divya Anandan | AB-1234 | 2026-11-05 09:00 to 18:00 | 2026-11-01T20:29:19 | CP-7K3F9Q
 ```
 
 ---

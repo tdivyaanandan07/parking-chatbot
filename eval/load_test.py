@@ -40,9 +40,11 @@ def chat_call(_):
 
 
 def admin_call(_):
-    r = requests.post(f"{ADMIN_URL}/requests", json={"test": True}, timeout=10)
+    r = requests.post(f"{ADMIN_URL}/requests", json={"reservation": {}, "message": "load test"},
+                      timeout=10)
     rid = r.json()["id"]
-    requests.post(f"{ADMIN_URL}/requests/{rid}/decision", json={"approved": True}, timeout=10)
+    # Refuse: approving also runs the MCP writer, which is measured separately below.
+    requests.post(f"{ADMIN_URL}/requests/{rid}/decision", json={"approved": False}, timeout=10)
 
 
 def mcp_call(i):
